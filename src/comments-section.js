@@ -1,278 +1,159 @@
-function CommentsSection (el, settings) 
-{
-    this.el = el;
-    this.settings = settings; // this.updatedObject(options, el.dataset);
-
-    this.comments = {}; // va fi {}
-
-    this.commentHasReplies = {
-        0: [1,2],
-        1: [3],
-    }; // nu am folosit inca
-
-    this.paginations = {};
-
-    this.collectComments = function(comments = [], self) {
-        let stack = {};
-        comments.forEach(function(el) {
-            stack[el.id] = new Comment(el, self);
-        });
-        return stack;
-    }
-
-    this.collectPaginations = function(paginations = [], self) {
-        let stack = {};
-        paginations.forEach(function(el) {
-            stack[el.id] = new Pagination(el, self);
-        });
-        return stack;
-    }
-
-    this.getRenderOrder = function(comments = {}, sort = "newest") {
-        // put them first in schema, then flat them in order
-        let sortedCommentIds = this.sortedCommentIds(comments, sort);
-        
-        let renderSchema = [];
-        sortedCommentIds.forEach(function(id) {
-            let parent = comments[id].parent || 0;
-            renderSchema[parent] ? renderSchema[parent].push(id) : renderSchema[parent] = [id]; 
-        });
-        let renderOrder = [];
-        renderSchema.forEach(function(_, parentId) { parentId = parseInt(parentId);
-            if (renderOrder.indexOf(parentId < 0)) renderOrder.push(parentId);
-            renderSchema[parentId].forEach(id => { id = parseInt(id);
-                if (renderOrder.indexOf(id < 0)) renderOrder.push(id);
-            });
-        });
-        return Array.from(new Set(renderOrder));
-    }
-
-    this.sortedCommentIds = function(comments = {}, sort = "newest") {
-        let ids = [];
-        for (id in comments) {
-            if (typeof id != "string" && typeof id != "number") {
-                console.log("wrong type");
-                console.log(typeof id);
-                continue;
-            }
-            console.log(comments)
-            ids.push(id);
-        }
-
-        if (sort == "newest") return ids.sort((a, b) => b - a);
-        if (sort == "oldest") return ids.sort((a, b) => a - b);
-    }
-
-    this.render = function(jsonResponse) {
-        // this.el.clear()
-        let comments = this.settings.getComments(jsonResponse);
-        let paginations = this.settings.getPaginations(jsonResponse);
-        this.comments = this.collectComments(comments, this);
-        this.paginations = this.collectPaginations(paginations, this);
-        let renderOrder = this.getRenderOrder(this.comments, this.settings.sort || "newest");
-
-        renderOrder.forEach(id => {
-            // create a fake comment as root, to ensure recursion
-            let comment = (id > 0) ? this.comments[id] : new Comment({id:0, parent:0});
-            let pagination = this.paginations[comment.parent??0]; // din db, root = null, nu 0
-            if (comment.id == 0 && !pagination.rendered) { // daca e practic primul render... o singura posibila situatie
-                this.el.appendChild(pagination.render());
-                return;
-            }
-            if (!pagination.rendered) { // ma asigur ca paginatia s-a scris deja
-                this.comments[comment.parent??0].repliesSection().appendChild(pagination.render());
-            }
-            pagination.commentsSection().appendChild(comment.render()); // preprend sometimes!!!
-        });
-    }
-
-    this.settings.mounted(this.render.bind(this));
-
     // https://stackoverflow.com/questions/1257040/best-approach-avoid-naming-conflicts-for-javascript-functions-in-separate-js-fi
 
-
-
-    //this.options.mounted(this);
-}
-
-function Comment(data, app)
+function CommentsSection (el, settings) 
 {
-    this.app = app;
-    this.id = data.id;
-    this.parent = data.parent;
-    this.content = data.content;
-    this.rendered = false;
+    this.app = {
+        el: el,
+        settings: settings,
+        comments: {},
+        paginations: {},
+        
+        collectComments(comments = []) {
+            let stack = {};
+            comments.forEach( el => {
+                let comment = this.settings.legend.comment ? this.translate(el, this.settings.legend.comment) : el;
+                if (!this.comments[comment.id])
+                    stack[comment.id] = new Comment(comment, this);
+            });
+            this.comments = Object.assign(this.comments, stack);
 
-    this.render = function() {
-        //console.log(this)
-        let comment = document.createElement('div');
-        comment.id = "comment_" + this.id;
-        comment.innerHTML = `
-            <div> 
-                <p id="content_of_comment_${this.id}"> ${this.content} </p>
-            </div>
-            <div class="pagination_container"></div>
-        `;
-        this.rendered = true;
-        return comment;
-    }
+            return stack;
+        },
 
-    this.repliesSection = function() {
-        return document.getElementById("comment_"+this.id).getElementsByClassName("pagination_container")[0];
-    }
-}
+        collectPaginations(paginations = []) {
+            console.log(1,paginations)
+            let stack = {};
+            paginations.forEach( el => {
+                let pagination = this.settings.legend.pagination ? this.translate(el, this.settings.legend.pagination) : pagination;
+                if (!this.paginations[pagination.id])
+                    stack[pagination.id] = new Pagination(pagination, this);
+            });
+            this.paginations = Object.assign(this.paginations, stack);
 
-function Pagination(data, app)
-{
-    this.app = app;
-    console.log(app)
-    this.id = data.id;
-    this.prev_page_url = data.prev_page_url;
-    this.next_page_url = data.next_page_url;
-    this.count_next = data.count_next;
-    this.count_prev = data.count_prev;
-    this.rendered = false;
+            return stack;
+        },
 
-    this.render = function() {
-        let pagination = document.createElement('div');
-        pagination.id = "comment_"+ this.id +"_replies_pagination";
-        pagination.innerHTML = `
-            <div id=""></div>
-            <div id="comments_list_${this.id}"></div>
-            <div class="next_page"></div>
-        `;
-        let nextPage = pagination.getElementsByClassName("next_page")[0];
-        if (this.next_page_url) {
-            nextPage.innerHTML = `<a href="javascript:;">Next page</a>`;
-            nextPage.firstChild.addEventListener("click", this.nextPage);
+        getRenderOrder(comments = {}) {
+            // put them first in schema, then flat them in order
+            let sortedCommentIds = this.sortedCommentIds(comments);
+            let renderSchema = [];
+            sortedCommentIds.forEach(function(id) {
+                let parent = comments[id].parent || 0;
+                renderSchema[parent] ? renderSchema[parent].push(id) : renderSchema[parent] = [id]; 
+            });
+            
+            let renderOrder = [];
+            renderSchema.forEach(function(_, parentId) { parentId = parseInt(parentId);
+                renderOrder.push(parentId);
+                renderSchema[parentId].forEach(id => { id = parseInt(id);
+                    renderOrder.push(id);
+                });
+            });
+            
+            return (Array.from(new Set(renderOrder))).filter(id => id > 0); // remove duplicates
+        },
+
+        sortedCommentIds(comments = {}, sort = "newest") {
+            let ids = [];
+            for (id in comments) {
+                if (typeof id != "string" && typeof id != "number") {
+                    console.log("wrong type");
+                    console.log(typeof id);
+                    continue;
+                }
+                ids.push(id);
+            }
+    
+            if (sort == "newest") return ids.sort((a, b) => b - a);
+            if (sort == "oldest") return ids.filter((a, b) => a - b);
+        },
+
+        translate(target, legend, reverse = false) { // reverse true doar cand ies afara din app
+            let result = {};
+            for (key in legend) {
+                let ak = reverse ? legend[key] : key;
+                result[ak] = target[ak];
+                console.log(target, result)
+            }
+            return result;
+        }, 
+
+        render(jsonResponse) {
+            // this.el.clear()
+            let comments = this.settings.getComments(jsonResponse);
+            let paginations = this.settings.getPaginations(jsonResponse);
+            console.log(12, paginations)
+            comments = this.collectComments(comments);
+            paginations = this.collectPaginations(paginations);
+            let renderOrder = this.getRenderOrder(comments);
+    
+            renderOrder.forEach(comment_id => {
+                let comment = this.comments[comment_id];
+                let parentPagination = this.paginations[comment.parent??0];
+                if (!parentPagination.rendered) {
+                    let parentNode = parentPagination.id == 0 ? this.el : comment.getParent().nodePaginationContainer();
+                    parentNode.appendChild(parentPagination.render());
+                }
+                if (parentPagination.id == 0)
+                    parentPagination.addCreateCommentButton();
+                if (!comment.rendered)
+                    parentPagination.nodeCommentsSection().appendChild(comment.render()); // prepend sometimes
+                if (comment.getChildPagination() && !comment.getChildPagination().rendered)
+                    comment.nodePaginationContainer().appendChild(comment.getChildPagination().render());
+                comment.addReplyButton();
+                this.paginations[0].openCreateCommentForm()
+            });
         }
-        this.rendered = true;
-        return pagination;
     }
+    this.app.settings.mounted(this.app.render.bind(this.app));
 
-    this.commentsSection = function() {
-        return document.getElementById("comments_list_"+(this.id));
-    }
-
-    this.nextPage = () => { 
-        let comments = [
-            {
-                id: 10,
-                parent: 1,
-                content: 'comment 10, parent 1',
-            },
-            {
-                id: 21,
-                parent: 1,
-                content: 'comment 21, parent 1',
-            },
-            {
-                id: 23,
-                parent: 1,
-                content: 'comment 23, parent 1',
-            },
-        ] // this.app.settings.getComments(jsonResponse);
-        let paginations = [
-            {
-                'id': 10,
-                'prev_page_url': null,
-                'next_page_url': 'foo/bar',
-                'count_next': 5,
-                'count_prev': 0
-            },
-            {
-                'id': 21,
-                'prev_page_url': null,
-                'next_page_url': 'foo/bar',
-                'count_next': 5,
-                'count_prev': 0
-            },
-            {
-                'id': 23,
-                'prev_page_url': null,
-                'next_page_url': 'foo/bar',
-                'count_next': 5,
-                'count_prev': 0
-            },
-        ] // this.app.settings.getPaginations(jsonResponse);
-        comments = this.app.collectComments(comments, this);
-        this.app.comments = Object.assign(comments, this.app.comments)
-        this.app.paginations = Object.assign(this.app.collectPaginations(paginations, this), this.app.paginations);
-        let renderOrder = this.app.getRenderOrder(comments, this.app.settings.sort || "newest");
-
-        renderOrder.forEach(id => {
-            // create a fake comment as root, to ensure recursion
-            let comment = (id > 0) ? this.comments[id] : new Comment({id:0, parent:0});
-            let pagination = this.paginations[comment.parent??0]; // din db, root = null, nu 0
-            if (comment.id == 0 && !pagination.rendered) { // daca e practic primul render... o singura posibila situatie
-                this.el.appendChild(pagination.render());
-                return;
-            }
-            if (!pagination.rendered) { // ma asigur ca paginatia s-a scris deja
-                this.comments[comment.parent??0].repliesSection().appendChild(pagination.render());
-            }
-            pagination.commentsSection().appendChild(comment.render()); // preprend sometimes!!!
-        });
-    }
+    return this.app;
 }
 
 let el = document.getElementById('comments-section');
 let app = new CommentsSection(el, {
-    getPaginations: function(response) {
-        return [
-            {
-                'id': 0,
-                'prev_page_url': null,
-                'next_page_url': 'foo/bar',
-                'count_next': 5,
-                'count_prev': 0
-            },
-            {
-                'id': 1,
-                'prev_page_url': null,
-                'next_page_url': 'foo/bar',
-                'count_next': 5,
-                'count_prev': 0
-            },
-            {
-                'id': 2,
-                'prev_page_url': null,
-                'next_page_url': 'foo/bar',
-                'count_next': 5,
-                'count_prev': 0
-            },
-            {
-                'id': 3,
-                'prev_page_url': null,
-                'next_page_url': 'foo/bar',
-                'count_next': 5,
-                'count_prev': 0
-            },
-        ];
+    getPaginations: function(response) { // 
+        let paginations = [response];
+        response.data.forEach(comment => {
+            paginations.push({
+                id: comment.id || 0,
+                prev_page_url: null,
+                next_page_url: `/comments?article=1&comment=${comment.id}`,
+                count_next: comment.count_replies,
+                count_prev: 0,
+            })
+        });
     },
     getComments: function(response) {
-        return [
-            {
-                id: 1,
-                parent: null,
-                content: 'comment 1',
-            },
-            {
-                id: 2,
-                parent: null,
-                content: 'comment 2',
-            },
-            {
-                id: 3,
-                parent: 1,
-                content: 'comment 3, parent 1',
-            },
-        ];
+        return response.data;
     },
 
     mounted: function(success) {
-        success()
+        axios.get("/comments", {params: {article: 1}}).then( res => {
+            success(res.data);
+        })
+    },
+
+    legend: {
+        comment: {
+            id: "id",
+            parent: "parent",
+            content: "content",
+            count_replies: "count_replies"
+        },
+        pagination: {
+            id: "id",
+            next_page_url: "next_page_url",
+            prev_page_url: "prev_page_url",
+            count_next: "count_next",
+            count_prev: "count_prev"
+        }
     }
 });
+
+function KBsize(obj) {
+    let size = sizeof(obj);
+    console.log(Math.round(size/1024) + 'kb');
+}
 
 // collect - parse paginations, add comments, add replies, add replies pagination

@@ -4,8 +4,41 @@
     </head>
 
     <body>
-
         <section id="comments-section"></section>
+
+        <script src="src/sizeof.js"></script>
+        <script src="src/axios.js"></script>
+        <script src="src/axios-mock-adapter.js"></script>
+        <script>
+            var mock = new AxiosMockAdapter(axios, { delayResponse: 2000 });
+            mock.onGet("/comments").reply(function(config) {
+                let response = [
+                    200,
+                    {
+                        // server must implement pagination id on each response
+                        id: config.params.comment || 0,
+                        prev_page_url: null,
+                        next_page_url: `/comments?article=${config.params.article}` + (config.params.comment ? `&comment=${config.params.comment}` : "") + `&page=${(config.params.page||1)+1}`,
+                        count_next: 5,
+                        count_prev: 0,
+                        data: [],
+                    },
+                ];
+                let commentIndex = (config.params.page || 0) * 5;
+                for (let i=commentIndex; i<commentIndex+5; i++) {
+                    response[1].data.push({
+                        id: new Date().getTime() % 1000000,
+                        parent: config.params.comment || null,
+                        content: `comment ${commentIndex+1}, parent ${config.params.page||0}`,
+                        count_replies: Math.floor(Math.random() * Math.floor(10))
+                    });
+                }
+                return response;
+            });
+        </script>
+        <script src="src/Comment.js"></script>
+        <script src="src/CommentForm.js"></script>
+        <script src="src/Pagination.js"></script>
         <script src="src/comments-section.js"></script>
         <script>
             //let el = document.getElementById('comments-section');
